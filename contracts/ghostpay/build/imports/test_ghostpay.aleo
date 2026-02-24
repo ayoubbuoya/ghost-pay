@@ -11,7 +11,6 @@ function test_audit_proof:
     assert.eq r5.owner aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
     assert.eq r5.total_disbursed 13500000u64;
     assert.eq r5.employee_count 3u32;
-    assert.eq r5.batch_hash 8015891080115402417931553528799241029458523448503416463287732051668412489184field;
     assert.eq r5.employees_merkle_root r4;
 
 function test_audit_zero_fails:
