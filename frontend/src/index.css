@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-aleo-cyan: #00d4ff;
+    --color-aleo-blue: #0066ff;
+    --color-aleo-purple: #7c3aed;
+  }
+
+  body {
+    @apply bg-aleo-darker text-gray-100;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-aleo-darker;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-700 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-600;
+  }
+}
+
+@layer components {
+  /* Glowing card effect — used across all dashboards */
+  .glow-card {
+    @apply relative overflow-hidden rounded-xl border border-aleo-border bg-aleo-card;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+  .glow-card:hover {
+    border-color: rgba(0, 212, 255, 0.3);
+    box-shadow: 0 0 30px rgba(0, 212, 255, 0.08);
+  }
+
+  /* Privacy indicator glow for private data */
+  .privacy-glow {
+    box-shadow: 0 0 12px rgba(124, 58, 237, 0.3);
+  }
+
+  /* Gradient text for headings */
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
+  }
+
+  /* Input field styling */
+  .ghost-input {
+    @apply w-full rounded-lg border border-gray-700 bg-gray-900/50 px-4 py-3
+           text-gray-100 placeholder-gray-500 outline-none
+           transition-all duration-200
+           focus:border-aleo-cyan/50 focus:ring-1 focus:ring-aleo-cyan/30;
+  }
+
+  /* Primary action button */
+  .ghost-btn {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-lg
+           px-6 py-3 font-semibold text-white
+           transition-all duration-300 ease-out
+           disabled:cursor-not-allowed disabled:opacity-50;
+    background: linear-gradient(135deg, #0066ff 0%, #7c3aed 100%);
+  }
+  .ghost-btn:hover:not(:disabled) {
+    box-shadow: 0 0 24px rgba(0, 102, 255, 0.4);
+    transform: translateY(-1px);
+  }
+  .ghost-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  /* Secondary / outline button */
+  .ghost-btn-outline {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-lg
+           border border-gray-600 px-6 py-3 font-semibold text-gray-300
+           transition-all duration-300 ease-out
+           hover:border-aleo-cyan/50 hover:text-white
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Background noise texture */
+  .noise-bg {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  }
+}
+
+@layer utilities {
+  /* Animated gradient border */
+  .animate-border {
+    background-size: 300% 300%;
+    animation: border-animation 4s ease infinite;
+  }
+
+  @keyframes border-animation {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+}
+

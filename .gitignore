@@ -1,1 +1,4 @@
 dev-docs
+node_modules
+dist
+.env
