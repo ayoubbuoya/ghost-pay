@@ -9,10 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@demox-labs/aleo-wallet-adapter-base": "^0.0.23",
+    "@demox-labs/aleo-wallet-adapter-leo": "^0.0.25",
+    "@demox-labs/aleo-wallet-adapter-react": "^0.0.22",
+    "@demox-labs/aleo-wallet-adapter-reactui": "^0.0.36",
     "@provablehq/sdk": "^0.9.16",
+    "lucide-react": "^0.474.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "lucide-react": "^0.474.0"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
@@ -25,4 +29,3 @@
     "vite": "^6.1.0"
   }
 }
-

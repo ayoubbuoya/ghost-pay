@@ -1,24 +1,14 @@
 // ========================================================
 // RegisterEmployee — Form for the employer to register a new employee
 //
-// Calls: ghostpay.aleo/register_employee transition
-//
-// Leo signature:
-//   async transition register_employee(
-//     employee: address,
-//     employee_id_hash: field,
-//     base_salary: u64,
-//     tax_rate_bps: u16,
-//     min_salary: u64,
-//     salt: scalar,
-//   ) -> (EmployeeRecord, Future)
+// Calls: ghostpay.aleo/register_employee transition via Leo Wallet
 //
 // Privacy flow:
 //   1. Employer fills in salary details
-//   2. Frontend computes salary_commitment = BHP256::hash(packed + salt)
-//   3. On-chain: ONLY the commitment hash is stored
-//   4. The employee receives a private EmployeeRecord with full salary data
-//   5. Nobody else can see the salary — not even the chain validators
+//   2. Leo Wallet generates ZK proof and salary commitment
+//   3. Transaction submitted to Aleo network
+//   4. On-chain: ONLY the commitment hash is stored
+//   5. The employee receives a private EmployeeRecord
 // ========================================================
 
 import { useState } from 'react';
@@ -26,11 +16,14 @@ import { UserPlus, Shield } from 'lucide-react';
 import GlowCard from '../common/GlowCard';
 import PrivacyBadge from '../common/PrivacyBadge';
 import TransactionStatusBar from '../common/TransactionStatusBar';
-import { useWallet } from '../../context/WalletContext';
-import type { EmployeeRecord, TransactionStatus } from '../../types/ghostpay';
+import { useGhostPay, useWallet } from '../../context/WalletContext';
+import { buildRegisterEmployeeTransaction } from '../../services/aleo';
+import type { TransactionStatus } from '../../types/ghostpay';
 
 export default function RegisterEmployee() {
-  const { employees, setEmployees, wallet, addTransaction } = useWallet();
+  const { addTransaction, refreshRecords } = useGhostPay();
+  const { publicKey, requestTransaction } = useWallet();
+
   const [form, setForm] = useState({
     address: '',
     name: '',
@@ -44,6 +37,12 @@ export default function RegisterEmployee() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate wallet connection
+    if (!publicKey || !requestTransaction) {
+      return alert('Please connect your Leo Wallet first');
+    }
+
     const base = parseInt(form.baseSalary, 10);
     const taxBps = Math.round(parseFloat(form.taxRate) * 100); // Convert % to bps
     const min = parseInt(form.minSalary, 10);
@@ -53,40 +52,69 @@ export default function RegisterEmployee() {
     if (min > base) return alert('Minimum salary cannot exceed base salary');
     if (base <= 0) return alert('Base salary must be positive');
 
-    // Simulate the transaction lifecycle for demo
-    setTxStatus({ state: 'building', timestamp: Date.now(), description: 'Constructing register_employee inputs...' });
+    try {
+      // Step 1: Build the transaction
+      setTxStatus({
+        state: 'building',
+        timestamp: Date.now(),
+        description: 'Constructing register_employee inputs...',
+      });
 
-    await new Promise(r => setTimeout(r, 800));
-    setTxStatus({ state: 'proving', timestamp: Date.now(), description: 'Generating ZK proof (salary commitment)...' });
+      // Generate a deterministic employee ID hash from the name
+      const employeeIdHash = `${Math.abs(hashString(form.name || form.address))}`;
 
-    await new Promise(r => setTimeout(r, 1500));
-    setTxStatus({ state: 'broadcasting', timestamp: Date.now(), description: 'Submitting to Aleo Testnet...' });
+      const transaction = buildRegisterEmployeeTransaction(publicKey, {
+        employeeAddress: form.address,
+        employeeIdHash,
+        baseSalary: base,
+        taxRateBps: taxBps,
+        minSalary: min,
+      });
 
-    await new Promise(r => setTimeout(r, 1000));
+      // Step 2: Submit to Leo Wallet (handles proving + broadcasting)
+      setTxStatus({
+        state: 'proving',
+        timestamp: Date.now(),
+        description: 'Leo Wallet is generating ZK proof...',
+      });
 
-    // Create the simulated EmployeeRecord (mirrors what the contract returns)
-    const idHash = `${Math.floor(Math.random() * 999999999)}field`;
-    const salt = `${Math.floor(Math.random() * 100000)}scalar`;
-    const newRecord: EmployeeRecord = {
-      owner: form.address || `aleo1${form.name.toLowerCase().padEnd(58, '0')}`,
-      employer: wallet.address!,
-      employee_id_hash: idHash,
-      salary_commitment: `${Math.floor(Math.random() * 999999999)}field`,
-      base_salary: base,
-      tax_rate_bps: taxBps,
-      min_salary: min,
-      salt,
-    };
+      const txId = await requestTransaction(transaction);
 
-    setEmployees(prev => [...prev, newRecord]);
+      // Step 3: Transaction submitted
+      setTxStatus({
+        state: 'confirmed',
+        timestamp: Date.now(),
+        description: 'Transaction submitted to network',
+        txId: txId as string,
+      });
+      addTransaction({
+        state: 'confirmed',
+        timestamp: Date.now(),
+        description: `Registered employee ${form.name}`,
+        txId: txId as string,
+      });
 
-    const txId = `at1${Math.random().toString(36).slice(2, 18)}`;
-    setTxStatus({ state: 'confirmed', timestamp: Date.now(), description: 'Employee registered successfully', txId });
-    addTransaction({ state: 'confirmed', timestamp: Date.now(), description: `Registered employee ${form.name}`, txId });
+      // Refresh records to pick up the new EmployeeRecord
+      await refreshRecords();
 
-    // Reset form
-    setForm({ address: '', name: '', baseSalary: '', taxRate: '', minSalary: '' });
-    setTimeout(() => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }), 4000);
+      // Reset form
+      setForm({ address: '', name: '', baseSalary: '', taxRate: '', minSalary: '' });
+      setTimeout(
+        () => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }),
+        4000,
+      );
+    } catch (error) {
+      console.error('Registration failed:', error);
+      setTxStatus({
+        state: 'failed',
+        timestamp: Date.now(),
+        description: `Failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+      setTimeout(
+        () => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }),
+        6000,
+      );
+    }
   };
 
   return (
@@ -114,7 +142,7 @@ export default function RegisterEmployee() {
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-400">Wallet Address</label>
             <input className="ghost-input font-mono text-xs" placeholder="aleo1..."
-              value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} />
+              value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} required />
           </div>
         </div>
 
@@ -157,7 +185,8 @@ export default function RegisterEmployee() {
 
         <TransactionStatusBar status={txStatus} />
 
-        <button type="submit" className="ghost-btn w-full" disabled={txStatus.state !== 'idle' && txStatus.state !== 'confirmed'}>
+        <button type="submit" className="ghost-btn w-full"
+          disabled={!publicKey || (txStatus.state !== 'idle' && txStatus.state !== 'confirmed')}>
           <UserPlus className="h-4 w-4" />
           Register Employee
         </button>
@@ -166,3 +195,14 @@ export default function RegisterEmployee() {
   );
 }
 
+/**
+ * Simple string hash for generating deterministic employee ID hashes.
+ * Uses djb2 algorithm — sufficient for demo/hackathon purposes.
+ */
+function hashString(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) + str.charCodeAt(i);
+  }
+  return hash >>> 0; // Ensure unsigned
+}

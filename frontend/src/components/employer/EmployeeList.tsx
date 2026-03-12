@@ -15,7 +15,7 @@ import { Users, Eye, EyeOff } from 'lucide-react';
 import { useState } from 'react';
 import GlowCard from '../common/GlowCard';
 import PrivacyBadge from '../common/PrivacyBadge';
-import { useWallet } from '../../context/WalletContext';
+import { useGhostPay } from '../../context/WalletContext';
 
 /** Format microcredits to a human-readable Aleo credit value */
 function formatCredits(micro: number): string {
@@ -23,7 +23,7 @@ function formatCredits(micro: number): string {
 }
 
 export default function EmployeeList() {
-  const { employees } = useWallet();
+  const { employees } = useGhostPay();
   const [showPrivate, setShowPrivate] = useState(true);
 
   return (

@@ -1,123 +1,55 @@
 // ========================================================
-// GhostPay — Aleo SDK Service Layer
+// GhostPay — Aleo Service Layer (Leo Wallet Integration)
 //
-// This module wraps all interactions with the Aleo blockchain
-// via the @provablehq/sdk. It handles:
-//   - Account management (key generation, import)
-//   - Program execution (building & submitting transactions)
-//   - Mapping reads (public on-chain state)
-//   - Record management (private state decryption)
+// This module provides:
+//   1. Transaction builders — create Transaction objects for Leo Wallet
+//   2. Record parsers — parse decrypted record plaintexts into TypeScript types
+//   3. Mapping readers — read public on-chain state via AleoNetworkClient
+//
+// All private key operations (signing, proving, decrypting) are delegated
+// to the Leo Wallet browser extension via the wallet adapter.
 //
 // SDK Reference: https://developer.aleo.org/sdk/guides/getting_started
-//
-// ARCHITECTURE NOTE:
-//   The ProgramManager handles ZK proof generation client-side via
-//   WebAssembly compiled from snarkVM. All private data stays in the
-//   browser — only encrypted proofs are sent to the network.
+// Wallet Adapter: https://github.com/ProvableHQ/aleo-wallet-adapter
 // ========================================================
+
+import {
+  Transaction,
+  WalletAdapterNetwork,
+} from "@demox-labs/aleo-wallet-adapter-base";
 
 import type {
   EmployeeRecord,
   SalaryPayment,
   AuditProof,
   PayrollBatchSummary,
-  TransactionStatus,
   RegisterEmployeeInput,
-  ProcessPayrollInput,
   GenerateAuditInput,
-} from '../types/ghostpay';
+} from "../types/ghostpay";
 
 // ============================================================
 // CONSTANTS
 // ============================================================
 
-const NETWORK_URL = import.meta.env.VITE_ALEO_NETWORK_URL || 'https://api.explorer.provable.com/v1';
-const PROGRAM_ID = import.meta.env.VITE_GHOSTPAY_PROGRAM_ID || 'ghostpay.aleo';
+/** Aleo network RPC endpoint for reading public state */
+const NETWORK_URL =
+  import.meta.env.VITE_ALEO_NETWORK_URL || "https://api.explorer.aleo.org/v1";
+
+/** Deployed program ID on-chain */
+const PROGRAM_ID = import.meta.env.VITE_GHOSTPAY_PROGRAM_ID || "ghostpay.aleo";
+
+/** Default transaction fee in microcredits (0.5 Aleo credits) */
+const DEFAULT_FEE = 500_000;
 
 // ============================================================
-// Aleo SDK Dynamic Import
+// TRANSACTION BUILDERS
 // ============================================================
+// These functions create Transaction objects that are passed to
+// Leo Wallet's `requestTransaction()`. The wallet handles ZK proof
+// generation, signing, and broadcasting to the network.
 
 /**
- * Lazily load the Aleo SDK. The SDK ships heavy WASM modules that should
- * only be loaded when needed. We import from the testnet entry point
- * per the official docs (https://developer.aleo.org/sdk/guides/getting_started).
- *
- * For mainnet, change the import to '@provablehq/sdk/mainnet.js'.
- */
-let sdkModule: typeof import('@provablehq/sdk') | null = null;
-let sdkInitialized = false;
-
-export async function initializeAleoSDK(): Promise<typeof import('@provablehq/sdk')> {
-  if (sdkModule && sdkInitialized) return sdkModule;
-
-  try {
-    // Dynamic import — network-specific entry point per Aleo docs
-    sdkModule = await import('@provablehq/sdk');
-
-    // Initialize the multi-threaded WASM pool for performant ZK proof generation.
-    // Must be called once before any other SDK operations.
-    // See: https://developer.aleo.org/sdk/guides/getting_started#webassembly-initialization
-    if ('initThreadPool' in sdkModule) {
-      await sdkModule.initThreadPool();
-    }
-
-    sdkInitialized = true;
-    return sdkModule;
-  } catch (error) {
-    console.warn('Aleo SDK initialization failed — running in demo mode.', error);
-    throw error;
-  }
-}
-
-// ============================================================
-// ACCOUNT MANAGEMENT
-// ============================================================
-
-/**
- * Generate a new Aleo account (private key, view key, address).
- *
- * In production, the private key should be stored securely (e.g., in
- * the Leo Wallet browser extension). For this demo, we generate
- * ephemeral accounts.
- */
-export async function createAccount(): Promise<{
-  privateKey: string;
-  viewKey: string;
-  address: string;
-}> {
-  const sdk = await initializeAleoSDK();
-  const account = new sdk.Account();
-  return {
-    privateKey: account.privateKey().to_string(),
-    viewKey: account.viewKey().to_string(),
-    address: account.address().to_string(),
-  };
-}
-
-/**
- * Import an existing Aleo account from a private key string.
- */
-export async function importAccount(privateKey: string): Promise<{
-  privateKey: string;
-  viewKey: string;
-  address: string;
-}> {
-  const sdk = await initializeAleoSDK();
-  const account = new sdk.Account({ privateKey });
-  return {
-    privateKey: account.privateKey().to_string(),
-    viewKey: account.viewKey().to_string(),
-    address: account.address().to_string(),
-  };
-}
-
-// ============================================================
-// PROGRAM EXECUTION — Employer Transitions
-// ============================================================
-
-/**
- * Execute `register_employee` transition on ghostpay.aleo.
+ * Build a transaction for `register_employee` transition.
  *
  * Leo signature:
  *   async transition register_employee(
@@ -129,53 +61,39 @@ export async function importAccount(privateKey: string): Promise<{
  *     salt: scalar,
  *   ) -> (EmployeeRecord, Future)
  *
- * Privacy: The salary data is embedded in the private EmployeeRecord
- * returned to the employee. On-chain, only the salary_commitment hash
- * is stored — the chain never learns the actual salary amount.
- *
- * @param privateKey  Employer's private key (the caller / self.caller)
- * @param input       Registration form data
- * @returns           Transaction ID on success
+ * @param publicKey  Connected wallet's public key (employer address)
+ * @param input      Registration form data
+ * @returns          Transaction object for Leo Wallet
  */
-export async function executeRegisterEmployee(
-  privateKey: string,
+export function buildRegisterEmployeeTransaction(
+  publicKey: string,
   input: RegisterEmployeeInput,
-): Promise<string> {
-  const sdk = await initializeAleoSDK();
-  const account = new sdk.Account({ privateKey });
-  const keyProvider = new sdk.AleoKeyProvider();
-  keyProvider.useCache(true);
-
-  const programManager = new sdk.ProgramManager(NETWORK_URL, keyProvider);
-  programManager.setAccount(account);
-
+): Transaction {
   // Generate a random salt as a scalar for the commitment blinding factor
-  const salt = `${Math.floor(Math.random() * 1000000)}scalar`;
+  const salt = `${Math.floor(Math.random() * 1_000_000_000)}scalar`;
 
-  // Format inputs according to Leo type annotations:
-  //   address, field, u64, u16, u64, scalar
+  // Format inputs according to Leo type annotations
   const inputs = [
-    input.employeeAddress,
-    `${input.employeeIdHash}field`,
-    `${input.baseSalary}u64`,
-    `${input.taxRateBps}u16`,
-    `${input.minSalary}u64`,
-    salt,
+    input.employeeAddress, // address
+    `${input.employeeIdHash}field`, // field
+    `${input.baseSalary}u64`, // u64
+    `${input.taxRateBps}u16`, // u16
+    `${input.minSalary}u64`, // u64
+    salt, // scalar
   ];
 
-  const txId = await programManager.execute({
-    programName: PROGRAM_ID,
-    functionName: 'register_employee',
+  return Transaction.createTransaction(
+    publicKey,
+    WalletAdapterNetwork.TestnetBeta,
+    PROGRAM_ID,
+    "register_employee",
     inputs,
-    priorityFee: 0.01,
-    privateFee: false,
-  });
-
-  return txId;
+    DEFAULT_FEE,
+  );
 }
 
 /**
- * Execute `process_payroll` transition on ghostpay.aleo.
+ * Build a transaction for `process_payroll` transition.
  *
  * Leo signature:
  *   async transition process_payroll(
@@ -185,87 +103,65 @@ export async function executeRegisterEmployee(
  *     batch_nonce: u64,
  *   ) -> (SalaryPayment, Future)
  *
- * ZK Circuit Constraints enforced:
- *   1. tax = (base / 10000) * tax_rate_bps
- *   2. net = base + bonus - tax
- *   3. net >= min_salary (contractual floor)
- *   4. net > 0
- *   5. payment_nonce not previously used
- *
- * Privacy: All salary amounts live only inside the returned private
- * SalaryPayment record. The on-chain batch summary has zero salary info.
+ * @param publicKey       Connected wallet's public key (employer)
+ * @param recordPlaintext Employee record plaintext string from Leo Wallet
+ * @param bonus           Bonus amount in microcredits
+ * @param batchId         Unique batch identifier
+ * @param batchNonce      Batch nonce for replay prevention
+ * @returns               Transaction object for Leo Wallet
  */
-export async function executeProcessPayroll(
-  privateKey: string,
-  employeeRecord: string,  // Plaintext record string
+export function buildProcessPayrollTransaction(
+  publicKey: string,
+  recordPlaintext: string,
   bonus: number,
   batchId: string,
   batchNonce: number,
-): Promise<string> {
-  const sdk = await initializeAleoSDK();
-  const account = new sdk.Account({ privateKey });
-  const keyProvider = new sdk.AleoKeyProvider();
-  keyProvider.useCache(true);
-
-  const programManager = new sdk.ProgramManager(NETWORK_URL, keyProvider);
-  programManager.setAccount(account);
-
+): Transaction {
   const inputs = [
-    employeeRecord,
-    `${bonus}u64`,
-    `${batchId}field`,
-    `${batchNonce}u64`,
+    recordPlaintext, // EmployeeRecord (private record)
+    `${bonus}u64`, // u64
+    `${batchId}field`, // field
+    `${batchNonce}u64`, // u64
   ];
 
-  const txId = await programManager.execute({
-    programName: PROGRAM_ID,
-    functionName: 'process_payroll',
+  return Transaction.createTransaction(
+    publicKey,
+    WalletAdapterNetwork.TestnetBeta,
+    PROGRAM_ID,
+    "process_payroll",
     inputs,
-    priorityFee: 0.01,
-    privateFee: false,
-  });
-
-  return txId;
+    DEFAULT_FEE,
+  );
 }
 
 /**
- * Execute `claim_salary` transition on ghostpay.aleo.
+ * Build a transaction for `claim_salary` transition.
  *
  * Leo signature:
  *   async transition claim_salary(payment: SalaryPayment) -> Future
  *
  * Called by: Employee (the SalaryPayment record owner)
- * Effect: Consumes the SalaryPayment record (double-spend prevention).
- *         Marks the payment_nonce as claimed on-chain.
  *
- * In production, this would also trigger a credits.aleo transfer.
- * For the hackathon, it proves entitlement and marks the nonce consumed.
+ * @param publicKey       Connected wallet's public key (employee)
+ * @param recordPlaintext SalaryPayment record plaintext string
+ * @returns               Transaction object for Leo Wallet
  */
-export async function executeClaimSalary(
-  privateKey: string,
-  paymentRecord: string,  // Plaintext SalaryPayment record string
-): Promise<string> {
-  const sdk = await initializeAleoSDK();
-  const account = new sdk.Account({ privateKey });
-  const keyProvider = new sdk.AleoKeyProvider();
-  keyProvider.useCache(true);
-
-  const programManager = new sdk.ProgramManager(NETWORK_URL, keyProvider);
-  programManager.setAccount(account);
-
-  const txId = await programManager.execute({
-    programName: PROGRAM_ID,
-    functionName: 'claim_salary',
-    inputs: [paymentRecord],
-    priorityFee: 0.01,
-    privateFee: false,
-  });
-
-  return txId;
+export function buildClaimSalaryTransaction(
+  publicKey: string,
+  recordPlaintext: string,
+): Transaction {
+  return Transaction.createTransaction(
+    publicKey,
+    WalletAdapterNetwork.TestnetBeta,
+    PROGRAM_ID,
+    "claim_salary",
+    [recordPlaintext],
+    DEFAULT_FEE,
+  );
 }
 
 /**
- * Execute `generate_audit_proof` transition on ghostpay.aleo.
+ * Build a transaction for `generate_audit_proof` transition.
  *
  * Leo signature:
  *   transition generate_audit_proof(
@@ -276,65 +172,252 @@ export async function executeClaimSalary(
  *     employees_merkle_root: field,
  *   ) -> AuditProof
  *
- * Called by: Employer
- * Output: Private AuditProof delivered to the auditor
- *
- * The auditor receives:  ✓ total disbursed, ✓ employee count, ✓ merkle root
- * The auditor CANNOT see: ✗ individual salaries, ✗ bonuses, ✗ tax breakdowns
+ * @param publicKey  Connected wallet's public key (employer)
+ * @param input      Audit proof generation parameters
+ * @returns          Transaction object for Leo Wallet
  */
-export async function executeGenerateAuditProof(
-  privateKey: string,
+export function buildGenerateAuditTransaction(
+  publicKey: string,
   input: GenerateAuditInput,
-): Promise<string> {
-  const sdk = await initializeAleoSDK();
-  const account = new sdk.Account({ privateKey });
-  const keyProvider = new sdk.AleoKeyProvider();
-  keyProvider.useCache(true);
-
-  const programManager = new sdk.ProgramManager(NETWORK_URL, keyProvider);
-  programManager.setAccount(account);
-
+): Transaction {
   const inputs = [
-    input.auditorAddress,
-    `${input.batchHash}field`,
-    `${input.totalDisbursed}u64`,
-    `${input.employeeCount}u32`,
-    `${input.employeesMerkleRoot}field`,
+    input.auditorAddress, // address
+    `${input.batchHash}field`, // field
+    `${input.totalDisbursed}u64`, // u64
+    `${input.employeeCount}u32`, // u32
+    `${input.employeesMerkleRoot}field`, // field
   ];
 
-  const txId = await programManager.execute({
-    programName: PROGRAM_ID,
-    functionName: 'generate_audit_proof',
+  return Transaction.createTransaction(
+    publicKey,
+    WalletAdapterNetwork.TestnetBeta,
+    PROGRAM_ID,
+    "generate_audit_proof",
     inputs,
-    priorityFee: 0.01,
-    privateFee: false,
-  });
-
-  return txId;
+    DEFAULT_FEE,
+  );
 }
 
+// ============================================================
+// RECORD PARSERS
+// ============================================================
+// Parse decrypted record plaintext strings (from Leo Wallet's
+// `requestRecords()`) into typed TypeScript objects.
+//
+// Record plaintext format example:
+//   {
+//     owner: aleo1abc...xyz.private,
+//     employer: aleo1def...uvw.private,
+//     employee_id_hash: 123456field.private,
+//     salary_commitment: 789012field.private,
+//     base_salary: 5000000u64.private,
+//     tax_rate_bps: 2000u16.private,
+//     min_salary: 3500000u64.private,
+//     salt: 42scalar.private,
+//     _nonce: 0group.public,
+//   }
+
+/**
+ * Extract a field value from a record plaintext string.
+ * Handles Aleo's type suffixes (u64, u32, u16, field, scalar, address, etc.)
+ * and visibility suffixes (.private, .public).
+ */
+function extractField(plaintext: string, fieldName: string): string | null {
+  // Match patterns like: fieldName: value.visibility
+  const regex = new RegExp(`${fieldName}:\\s*([^,}]+)`);
+  const match = plaintext.match(regex);
+  if (!match) return null;
+  // Remove trailing .private/.public and whitespace
+  return match[1]
+    .trim()
+    .replace(/\.(private|public)$/, "")
+    .trim();
+}
+
+/**
+ * Parse a numeric value from a record field, stripping Aleo type suffixes.
+ * e.g., "5000000u64" -> 5000000
+ */
+function parseNumeric(value: string): number {
+  return parseInt(value.replace(/[a-z]+$/i, ""), 10);
+}
+
+/**
+ * Determine the record type from its plaintext structure.
+ * Uses field presence heuristics since Aleo records don't have explicit type tags.
+ */
+export function identifyRecordType(
+  plaintext: string,
+): "EmployeeRecord" | "SalaryPayment" | "AuditProof" | "unknown" {
+  if (
+    plaintext.includes("salary_commitment") &&
+    plaintext.includes("base_salary")
+  ) {
+    return "EmployeeRecord";
+  }
+  if (plaintext.includes("net_salary") && plaintext.includes("payment_nonce")) {
+    return "SalaryPayment";
+  }
+  if (
+    plaintext.includes("total_disbursed") &&
+    plaintext.includes("employees_merkle_root")
+  ) {
+    return "AuditProof";
+  }
+  return "unknown";
+}
+
+/**
+ * Parse a decrypted EmployeeRecord plaintext into a TypeScript object.
+ */
+export function parseEmployeeRecord(plaintext: string): EmployeeRecord | null {
+  try {
+    return {
+      owner: extractField(plaintext, "owner") || "",
+      employer: extractField(plaintext, "employer") || "",
+      employee_id_hash: extractField(plaintext, "employee_id_hash") || "",
+      salary_commitment: extractField(plaintext, "salary_commitment") || "",
+      base_salary: parseNumeric(extractField(plaintext, "base_salary") || "0"),
+      tax_rate_bps: parseNumeric(
+        extractField(plaintext, "tax_rate_bps") || "0",
+      ),
+      min_salary: parseNumeric(extractField(plaintext, "min_salary") || "0"),
+      salt: extractField(plaintext, "salt") || "",
+      _recordPlaintext: plaintext,
+    };
+  } catch (error) {
+    console.error("Failed to parse EmployeeRecord:", error);
+    return null;
+  }
+}
+
+/**
+ * Parse a decrypted SalaryPayment plaintext into a TypeScript object.
+ */
+export function parseSalaryPayment(plaintext: string): SalaryPayment | null {
+  try {
+    return {
+      owner: extractField(plaintext, "owner") || "",
+      employer: extractField(plaintext, "employer") || "",
+      batch_hash: extractField(plaintext, "batch_hash") || "",
+      net_salary: parseNumeric(extractField(plaintext, "net_salary") || "0"),
+      bonus: parseNumeric(extractField(plaintext, "bonus") || "0"),
+      tax_deducted: parseNumeric(
+        extractField(plaintext, "tax_deducted") || "0",
+      ),
+      payment_nonce: extractField(plaintext, "payment_nonce") || "",
+      _recordPlaintext: plaintext,
+    };
+  } catch (error) {
+    console.error("Failed to parse SalaryPayment:", error);
+    return null;
+  }
+}
+
+/**
+ * Parse a decrypted AuditProof plaintext into a TypeScript object.
+ */
+export function parseAuditProof(plaintext: string): AuditProof | null {
+  try {
+    return {
+      owner: extractField(plaintext, "owner") || "",
+      employer: extractField(plaintext, "employer") || "",
+      batch_hash: extractField(plaintext, "batch_hash") || "",
+      total_disbursed: parseNumeric(
+        extractField(plaintext, "total_disbursed") || "0",
+      ),
+      employee_count: parseNumeric(
+        extractField(plaintext, "employee_count") || "0",
+      ),
+      employees_merkle_root:
+        extractField(plaintext, "employees_merkle_root") || "",
+      _recordPlaintext: plaintext,
+    };
+  } catch (error) {
+    console.error("Failed to parse AuditProof:", error);
+    return null;
+  }
+}
+
+/**
+ * Parse all records returned by Leo Wallet's `requestRecords()`.
+ * Categorizes them by type and returns typed arrays.
+ */
+export function parseAllRecords(records: Array<{ plaintext: string }>): {
+  employees: EmployeeRecord[];
+  payments: SalaryPayment[];
+  auditProofs: AuditProof[];
+} {
+  const employees: EmployeeRecord[] = [];
+  const payments: SalaryPayment[] = [];
+  const auditProofs: AuditProof[] = [];
+
+  for (const record of records) {
+    const text = record.plaintext;
+    const type = identifyRecordType(text);
+
+    switch (type) {
+      case "EmployeeRecord": {
+        const parsed = parseEmployeeRecord(text);
+        if (parsed) employees.push(parsed);
+        break;
+      }
+      case "SalaryPayment": {
+        const parsed = parseSalaryPayment(text);
+        if (parsed) payments.push(parsed);
+        break;
+      }
+      case "AuditProof": {
+        const parsed = parseAuditProof(text);
+        if (parsed) auditProofs.push(parsed);
+        break;
+      }
+      default:
+        console.warn("Unknown record type:", text.slice(0, 100));
+    }
+  }
+
+  return { employees, payments, auditProofs };
+}
 
 // ============================================================
 // PUBLIC STATE — Mapping Reads
 // ============================================================
+// These functions read public on-chain mappings directly via
+// the Aleo network API. No wallet connection required.
+
+/** Lazy-loaded Aleo SDK for network client operations */
+let sdkModule: typeof import("@provablehq/sdk") | null = null;
 
 /**
- * Read a value from the `employee_commitments` mapping.
+ * Get or initialize the Aleo SDK for network client operations.
+ * Only used for reading public mappings — not for signing/proving.
+ */
+async function getSDK(): Promise<typeof import("@provablehq/sdk")> {
+  if (sdkModule) return sdkModule;
+
+  sdkModule = await import("@provablehq/sdk");
+  if ("initThreadPool" in sdkModule) {
+    await sdkModule.initThreadPool();
+  }
+  return sdkModule;
+}
+
+/**
+ * Read an employee's salary commitment from the public mapping.
  *
  * On-chain mapping: employee_id_hash (field) => salary_commitment (field)
- *
- * This data is PUBLIC — anyone can see that an employee commitment exists,
- * but the commitment itself reveals nothing about the actual salary.
- * It's a BHP256 hash with a random salt, making it computationally
- * infeasible to reverse-engineer the salary.
+ * Public data — reveals only that a commitment exists, not the salary.
  */
-export async function getEmployeeCommitment(employeeIdHash: string): Promise<string | null> {
+export async function getEmployeeCommitment(
+  employeeIdHash: string,
+): Promise<string | null> {
   try {
-    const sdk = await initializeAleoSDK();
+    const sdk = await getSDK();
     const networkClient = new sdk.AleoNetworkClient(NETWORK_URL);
     const value = await networkClient.getProgramMappingValue(
       PROGRAM_ID,
-      'employee_commitments',
+      "employee_commitments",
       `${employeeIdHash}field`,
     );
     return value;
@@ -344,25 +427,23 @@ export async function getEmployeeCommitment(employeeIdHash: string): Promise<str
 }
 
 /**
- * Read a value from the `payroll_batches` mapping.
+ * Read a payroll batch summary from the public mapping.
  *
  * On-chain mapping: batch_hash (field) => PayrollBatchSummary
- *
- * This is PUBLIC data — the batch summary intentionally contains NO
- * salary information. Only batch metadata: hash, employer, headcount,
- * nonce, and finalization status.
+ * Public data — contains NO salary information.
  */
-export async function getPayrollBatch(batchHash: string): Promise<PayrollBatchSummary | null> {
+export async function getPayrollBatch(
+  batchHash: string,
+): Promise<PayrollBatchSummary | null> {
   try {
-    const sdk = await initializeAleoSDK();
+    const sdk = await getSDK();
     const networkClient = new sdk.AleoNetworkClient(NETWORK_URL);
     const value = await networkClient.getProgramMappingValue(
       PROGRAM_ID,
-      'payroll_batches',
+      "payroll_batches",
       `${batchHash}field`,
     );
     if (!value) return null;
-    // Parse the struct from on-chain format
     return JSON.parse(value) as PayrollBatchSummary;
   } catch {
     return null;
@@ -370,130 +451,52 @@ export async function getPayrollBatch(batchHash: string): Promise<PayrollBatchSu
 }
 
 /**
- * Read the employer's registered employee count.
+ * Read the employer's registered employee count from the public mapping.
  *
  * On-chain mapping: employer_address => u32 count
- * PUBLIC data — reveals only headcount, not identities or salaries.
+ * Public data — reveals only headcount, not identities or salaries.
  */
-export async function getEmployeeCount(employerAddress: string): Promise<number> {
+export async function getEmployeeCount(
+  employerAddress: string,
+): Promise<number> {
   try {
-    const sdk = await initializeAleoSDK();
+    const sdk = await getSDK();
     const networkClient = new sdk.AleoNetworkClient(NETWORK_URL);
     const value = await networkClient.getProgramMappingValue(
       PROGRAM_ID,
-      'employee_count_per_employer',
+      "employee_count_per_employer",
       employerAddress,
     );
     if (!value) return 0;
-    return parseInt(value.replace('u32', ''), 10);
+    return parseInt(value.replace("u32", ""), 10);
   } catch {
     return 0;
   }
 }
 
 /**
- * Check whether a payment nonce has been claimed.
+ * Check whether a payment nonce has been claimed from the public mapping.
  *
  * On-chain mapping: payment_nonce (field) => bool
- * PUBLIC data — reveals only whether a specific payment was claimed,
- * not the amount or recipient.
+ * Public data — reveals only whether a payment was claimed, not the amount.
  */
 export async function isPaymentClaimed(paymentNonce: string): Promise<boolean> {
   try {
-    const sdk = await initializeAleoSDK();
+    const sdk = await getSDK();
     const networkClient = new sdk.AleoNetworkClient(NETWORK_URL);
     const value = await networkClient.getProgramMappingValue(
       PROGRAM_ID,
-      'claimed_payments',
+      "claimed_payments",
       `${paymentNonce}field`,
     );
-    return value === 'true';
+    return value === "true";
   } catch {
     return false;
   }
 }
 
 // ============================================================
-// DEMO DATA — For hackathon demonstration purposes
+// EXPORTS — Program ID for components that need it
 // ============================================================
 
-/**
- * Generate demo data simulating a full payroll cycle.
- * This allows the frontend to be demonstrated without requiring
- * a deployed contract or real Aleo credits.
- *
- * In production, all this data would come from on-chain state
- * and decrypted private records.
- */
-export function generateDemoData() {
-  const employer = 'aleo1employer0000000000000000000000000000000000000000000000000';
-  const employees: EmployeeRecord[] = [
-    {
-      owner: 'aleo1alice00000000000000000000000000000000000000000000000000000',
-      employer,
-      employee_id_hash: '1234567890field',
-      salary_commitment: '9876543210field',
-      base_salary: 5000000,     // 5M microcredits
-      tax_rate_bps: 2000,       // 20%
-      min_salary: 3500000,      // 3.5M microcredits
-      salt: '42scalar',
-    },
-    {
-      owner: 'aleo1bob0000000000000000000000000000000000000000000000000000000',
-      employer,
-      employee_id_hash: '2345678901field',
-      salary_commitment: '8765432109field',
-      base_salary: 7500000,     // 7.5M microcredits
-      tax_rate_bps: 2500,       // 25%
-      min_salary: 5000000,      // 5M microcredits
-      salt: '99scalar',
-    },
-    {
-      owner: 'aleo1carol000000000000000000000000000000000000000000000000000000',
-      employer,
-      employee_id_hash: '3456789012field',
-      salary_commitment: '7654321098field',
-      base_salary: 6000000,     // 6M microcredits
-      tax_rate_bps: 1800,       // 18%
-      min_salary: 4200000,      // 4.2M microcredits
-      salt: '77scalar',
-    },
-  ];
-
-  // Compute salary payments following the contract's formula:
-  //   tax = (base / 10000) * tax_rate_bps
-  //   net = base + bonus - tax
-  const payments: SalaryPayment[] = employees.map((emp, i) => {
-    const bonus = [500000, 750000, 300000][i];
-    const tax = Math.floor(emp.base_salary / 10000) * emp.tax_rate_bps;
-    const net = emp.base_salary + bonus - tax;
-    return {
-      owner: emp.owner,
-      employer: emp.employer,
-      batch_hash: '1000field',
-      net_salary: net,
-      bonus,
-      tax_deducted: tax,
-      payment_nonce: `${i + 100}field`,
-    };
-  });
-
-  const batchSummary: PayrollBatchSummary = {
-    batch_hash: '1000field',
-    employer,
-    employee_count: employees.length,
-    nonce: 1,
-    finalized: false,
-  };
-
-  const auditProof: AuditProof = {
-    owner: 'aleo1auditor0000000000000000000000000000000000000000000000000000',
-    employer,
-    batch_hash: '1000field',
-    total_disbursed: payments.reduce((sum, p) => sum + p.net_salary, 0),
-    employee_count: employees.length,
-    employees_merkle_root: '5555555555field',
-  };
-
-  return { employer, employees, payments, batchSummary, auditProof };
-}
+export { PROGRAM_ID, NETWORK_URL };

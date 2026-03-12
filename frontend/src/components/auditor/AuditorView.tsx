@@ -19,10 +19,10 @@ import { ShieldCheck, Eye, EyeOff, Banknote, Users, Shield } from 'lucide-react'
 import StatusCard from '../common/StatusCard';
 import AuditProofCard from './AuditProofCard';
 import GlowCard from '../common/GlowCard';
-import { useWallet } from '../../context/WalletContext';
+import { useGhostPay } from '../../context/WalletContext';
 
 export default function AuditorView() {
-  const { auditProofs, batchSummaries } = useWallet();
+  const { auditProofs, batchSummaries } = useGhostPay();
 
   const totalDisbursed = auditProofs.reduce((s, p) => s + p.total_disbursed, 0);
   const totalEmployees = auditProofs.reduce((s, p) => s + p.employee_count, 0);

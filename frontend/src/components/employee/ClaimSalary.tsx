@@ -1,23 +1,14 @@
 // ========================================================
 // ClaimSalary — Employee claims their salary payment
 //
-// Calls: ghostpay.aleo/claim_salary transition
-//
-// Leo signature:
-//   async transition claim_salary(
-//     payment: SalaryPayment,
-//   ) -> Future
+// Calls: ghostpay.aleo/claim_salary transition via Leo Wallet
 //
 // Privacy flow:
 //   1. Employee selects an unclaimed SalaryPayment record
-//   2. The transition consumes the record (destroys it on-chain)
-//   3. The payment_nonce is marked as claimed in a public mapping
-//   4. The actual Aleo credits are transferred to the employee
-//   5. On-chain: only the payment_nonce boolean flip is visible
+//   2. Leo Wallet generates ZK proof and consumes the record
+//   3. The payment_nonce is marked as claimed on-chain
+//   4. On-chain: only the nonce boolean flip is visible
 //      — the amount and recipient remain private
-//
-// Anti-replay: The contract uses payment_nonce to prevent
-// double-claiming. Each nonce can only be claimed once.
 // ========================================================
 
 import { useState } from 'react';
@@ -25,7 +16,8 @@ import { Download, Shield, CheckCircle } from 'lucide-react';
 import GlowCard from '../common/GlowCard';
 import PrivacyBadge from '../common/PrivacyBadge';
 import TransactionStatusBar from '../common/TransactionStatusBar';
-import { useWallet } from '../../context/WalletContext';
+import { useGhostPay, useWallet } from '../../context/WalletContext';
+import { buildClaimSalaryTransaction } from '../../services/aleo';
 import type { TransactionStatus } from '../../types/ghostpay';
 
 function formatCredits(micro: number): string {
@@ -33,35 +25,83 @@ function formatCredits(micro: number): string {
 }
 
 export default function ClaimSalary() {
-  const { payments, employees, addTransaction } = useWallet();
+  const { payments, employees, addTransaction, refreshRecords } = useGhostPay();
+  const { publicKey, requestTransaction } = useWallet();
+
   const myRecord = employees[0] || null;
   const myPayments = payments.filter(p => p.owner === myRecord?.owner);
+
   const [claimedNonces, setClaimedNonces] = useState<Set<string>>(new Set());
   const [txStatus, setTxStatus] = useState<TransactionStatus>({
     state: 'idle', timestamp: Date.now(), description: '',
   });
   const [claimingNonce, setClaimingNonce] = useState<string | null>(null);
 
-  const handleClaim = async (nonce: string, amount: number) => {
+  const handleClaim = async (nonce: string, amount: number, recordPlaintext?: string) => {
+    if (!publicKey || !requestTransaction) {
+      return alert('Please connect your Leo Wallet first');
+    }
+
+    if (!recordPlaintext) {
+      return alert('Record plaintext not available. Please refresh records first.');
+    }
+
     setClaimingNonce(nonce);
 
-    setTxStatus({ state: 'building', timestamp: Date.now(), description: 'Building claim_salary transaction...' });
-    await new Promise(r => setTimeout(r, 600));
+    try {
+      setTxStatus({
+        state: 'building',
+        timestamp: Date.now(),
+        description: 'Building claim_salary transaction...',
+      });
 
-    setTxStatus({ state: 'proving', timestamp: Date.now(), description: 'Generating ZK proof (record consumption)...' });
-    await new Promise(r => setTimeout(r, 1200));
+      // Build and submit via Leo Wallet
+      const transaction = buildClaimSalaryTransaction(publicKey, recordPlaintext);
 
-    setTxStatus({ state: 'broadcasting', timestamp: Date.now(), description: 'Broadcasting claim to network...' });
-    await new Promise(r => setTimeout(r, 800));
+      setTxStatus({
+        state: 'proving',
+        timestamp: Date.now(),
+        description: 'Leo Wallet generating ZK proof (record consumption)...',
+      });
 
-    setClaimedNonces(prev => new Set(prev).add(nonce));
+      const txId = await requestTransaction(transaction);
 
-    const txId = `at1${Math.random().toString(36).slice(2, 18)}`;
-    setTxStatus({ state: 'confirmed', timestamp: Date.now(), description: `Claimed ${formatCredits(amount)}`, txId });
-    addTransaction({ state: 'confirmed', timestamp: Date.now(), description: `Claimed salary: ${formatCredits(amount)}`, txId });
+      setClaimedNonces(prev => new Set(prev).add(nonce));
 
-    setClaimingNonce(null);
-    setTimeout(() => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }), 4000);
+      setTxStatus({
+        state: 'confirmed',
+        timestamp: Date.now(),
+        description: `Claimed ${formatCredits(amount)}`,
+        txId: txId as string,
+      });
+      addTransaction({
+        state: 'confirmed',
+        timestamp: Date.now(),
+        description: `Claimed salary: ${formatCredits(amount)}`,
+        txId: txId as string,
+      });
+
+      // Refresh records — the consumed SalaryPayment record should disappear
+      await refreshRecords();
+
+      setClaimingNonce(null);
+      setTimeout(
+        () => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }),
+        4000,
+      );
+    } catch (error) {
+      console.error('Salary claim failed:', error);
+      setClaimingNonce(null);
+      setTxStatus({
+        state: 'failed',
+        timestamp: Date.now(),
+        description: `Failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+      setTimeout(
+        () => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }),
+        6000,
+      );
+    }
   };
 
   return (
@@ -88,9 +128,8 @@ export default function ClaimSalary() {
             const isClaiming = claimingNonce === pay.payment_nonce;
 
             return (
-              <div key={pay.payment_nonce} className={`flex items-center justify-between rounded-lg border p-4 ${
-                isClaimed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-gray-800 bg-gray-900/20'
-              }`}>
+              <div key={pay.payment_nonce} className={`flex items-center justify-between rounded-lg border p-4 ${isClaimed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-gray-800 bg-gray-900/20'
+                }`}>
                 <div>
                   <p className="text-sm font-medium text-white">{formatCredits(pay.net_salary)}</p>
                   <p className="text-xs text-gray-500">
@@ -103,9 +142,10 @@ export default function ClaimSalary() {
                   </span>
                 ) : (
                   <button
-                    onClick={() => handleClaim(pay.payment_nonce, pay.net_salary)}
+                    onClick={() => handleClaim(pay.payment_nonce, pay.net_salary, pay._recordPlaintext)}
                     className="ghost-btn px-4 py-2 text-xs"
-                    disabled={isClaiming || (txStatus.state !== 'idle' && txStatus.state !== 'confirmed')}
+                    disabled={!publicKey || isClaiming ||
+                      (txStatus.state !== 'idle' && txStatus.state !== 'confirmed')}
                   >
                     <Download className="h-3 w-3" /> Claim
                   </button>
@@ -129,4 +169,3 @@ export default function ClaimSalary() {
     </GlowCard>
   );
 }
-

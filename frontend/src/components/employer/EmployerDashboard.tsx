@@ -20,10 +20,10 @@ import RegisterEmployee from './RegisterEmployee';
 import EmployeeList from './EmployeeList';
 import ProcessPayroll from './ProcessPayroll';
 import GenerateAudit from './GenerateAudit';
-import { useWallet } from '../../context/WalletContext';
+import { useGhostPay } from '../../context/WalletContext';
 
 export default function EmployerDashboard() {
-  const { employees, payments, batchSummaries, auditProofs } = useWallet();
+  const { employees, payments, batchSummaries, auditProofs } = useGhostPay();
 
   const totalDisbursed = payments.reduce((s, p) => s + p.net_salary, 0);
 

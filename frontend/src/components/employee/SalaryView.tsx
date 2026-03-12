@@ -20,14 +20,14 @@
 import { Wallet, Shield, ArrowRight } from 'lucide-react';
 import GlowCard from '../common/GlowCard';
 import PrivacyBadge from '../common/PrivacyBadge';
-import { useWallet } from '../../context/WalletContext';
+import { useGhostPay } from '../../context/WalletContext';
 
 function formatCredits(micro: number): string {
   return `${(micro / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} AC`;
 }
 
 export default function SalaryView() {
-  const { employees, payments } = useWallet();
+  const { employees, payments } = useGhostPay();
   // In demo mode, show the first employee's perspective
   const myRecord = employees[0] || null;
   const myPayments = payments.filter(p => p.owner === myRecord?.owner);

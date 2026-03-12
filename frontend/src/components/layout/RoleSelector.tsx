@@ -13,7 +13,7 @@
 // ========================================================
 
 import { Building2, User, ShieldCheck } from 'lucide-react';
-import { useWallet } from '../../context/WalletContext';
+import { useGhostPay } from '../../context/WalletContext';
 import type { UserRole } from '../../types/ghostpay';
 
 const roles: { id: UserRole; label: string; icon: React.ReactNode; desc: string }[] = [
@@ -38,7 +38,7 @@ const roles: { id: UserRole; label: string; icon: React.ReactNode; desc: string 
 ];
 
 export default function RoleSelector() {
-  const { activeRole, setActiveRole } = useWallet();
+  const { activeRole, setActiveRole } = useGhostPay();
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-6">
@@ -49,26 +49,23 @@ export default function RoleSelector() {
             <button
               key={role.id}
               onClick={() => setActiveRole(role.id)}
-              className={`group flex flex-1 items-center gap-3 rounded-xl border px-5 py-4 text-left transition-all duration-300 ${
-                isActive
+              className={`group flex flex-1 items-center gap-3 rounded-xl border px-5 py-4 text-left transition-all duration-300 ${isActive
                   ? 'border-aleo-cyan/40 bg-aleo-cyan/5 shadow-lg shadow-aleo-cyan/5'
                   : 'border-aleo-border bg-aleo-card hover:border-gray-600'
-              }`}
+                }`}
             >
               <div
-                className={`rounded-lg p-2 transition-colors ${
-                  isActive
+                className={`rounded-lg p-2 transition-colors ${isActive
                     ? 'bg-aleo-cyan/20 text-aleo-cyan'
                     : 'bg-gray-800 text-gray-400 group-hover:text-gray-300'
-                }`}
+                  }`}
               >
                 {role.icon}
               </div>
               <div>
                 <p
-                  className={`font-semibold ${
-                    isActive ? 'text-white' : 'text-gray-300'
-                  }`}
+                  className={`font-semibold ${isActive ? 'text-white' : 'text-gray-300'
+                    }`}
                 >
                   {role.label}
                 </p>

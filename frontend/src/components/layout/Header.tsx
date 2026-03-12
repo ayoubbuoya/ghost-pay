@@ -1,21 +1,20 @@
 // ========================================================
-// Header — Top navigation bar with wallet status and branding
+// Header — Top navigation bar with Leo Wallet connect button
 //
 // Shows:
 //   - GhostPay logo and tagline
-//   - Connected wallet address (truncated)
+//   - Leo Wallet connect/disconnect button (WalletMultiButton)
 //   - Network indicator (Testnet)
-//   - Demo mode badge
+//   - Connected wallet address
 // ========================================================
 
-import { Ghost, Wifi, WifiOff } from 'lucide-react';
-import { useWallet } from '../../context/WalletContext';
+import { Ghost, RefreshCw } from 'lucide-react';
+import { WalletMultiButton } from '@demox-labs/aleo-wallet-adapter-reactui';
+import { useWallet, useGhostPay } from '../../context/WalletContext';
 
 export default function Header() {
-  const { wallet, isDemoMode } = useWallet();
-
-  const truncateAddress = (addr: string) =>
-    `${addr.slice(0, 10)}...${addr.slice(-6)}`;
+  const { publicKey } = useWallet();
+  const { refreshRecords, isRefreshing } = useGhostPay();
 
   return (
     <header className="sticky top-0 z-50 border-b border-aleo-border bg-aleo-darker/80 backdrop-blur-xl">
@@ -37,37 +36,31 @@ export default function Header() {
         </div>
 
         {/* Right side — wallet & network */}
-        <div className="flex items-center gap-4">
-          {isDemoMode && (
-            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-400">
-              Demo Mode
-            </span>
-          )}
-
+        <div className="flex items-center gap-3">
+          {/* Network badge */}
           <div className="flex items-center gap-2 rounded-lg border border-aleo-border bg-gray-900/50 px-3 py-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-aleo-cyan">
-              {wallet.network}
+              testnet
             </span>
           </div>
 
-          <div className="flex items-center gap-2 rounded-lg border border-aleo-border bg-gray-900/50 px-3 py-2">
-            {wallet.connected ? (
-              <>
-                <Wifi className="h-3.5 w-3.5 text-emerald-400" />
-                <span className="font-mono text-xs text-gray-300">
-                  {wallet.address ? truncateAddress(wallet.address) : 'Connected'}
-                </span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="h-3.5 w-3.5 text-red-400" />
-                <span className="text-xs text-gray-500">Disconnected</span>
-              </>
-            )}
-          </div>
+          {/* Refresh records button — only shown when connected */}
+          {publicKey && (
+            <button
+              onClick={refreshRecords}
+              disabled={isRefreshing}
+              className="ghost-btn-outline flex items-center gap-2 px-3 py-2 text-xs"
+              title="Refresh records from the Aleo network"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Syncing...' : 'Refresh'}
+            </button>
+          )}
+
+          {/* Leo Wallet connect button — provided by the wallet adapter UI */}
+          <WalletMultiButton />
         </div>
       </div>
     </header>
   );
 }
-

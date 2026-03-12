@@ -1,23 +1,15 @@
 // ========================================================
 // ProcessPayroll — Execute a payroll batch for all employees
 //
-// Calls: ghostpay.aleo/process_payroll transition (once per employee)
-//
-// Leo signature:
-//   async transition process_payroll(
-//     record: EmployeeRecord,
-//     bonus: u64,
-//     batch_nonce: u32,
-//     batch_hash: field,
-//   ) -> (EmployeeRecord, SalaryPayment, Future)
+// Calls: ghostpay.aleo/process_payroll transition via Leo Wallet
+//        (once per employee in the batch)
 //
 // Privacy flow:
 //   1. Employer sets bonus amounts per employee
-//   2. Contract computes: tax = (base / 10000) * tax_rate_bps
-//   3. Contract computes: net = base + bonus - tax
-//   4. Contract verifies: net >= min_salary (ZK constraint)
-//   5. A private SalaryPayment record is issued to the employee
-//   6. On-chain: only a PayrollBatchSummary (no salary data) is stored
+//   2. Leo Wallet generates ZK proofs per employee
+//   3. Contract verifies: net >= min_salary (ZK constraint)
+//   4. Private SalaryPayment records issued to each employee
+//   5. On-chain: only PayrollBatchSummary stored (no salary data)
 // ========================================================
 
 import { useState } from 'react';
@@ -25,11 +17,14 @@ import { Banknote, Shield, Zap } from 'lucide-react';
 import GlowCard from '../common/GlowCard';
 import PrivacyBadge from '../common/PrivacyBadge';
 import TransactionStatusBar from '../common/TransactionStatusBar';
-import { useWallet } from '../../context/WalletContext';
-import type { SalaryPayment, TransactionStatus, PayrollBatchSummary } from '../../types/ghostpay';
+import { useGhostPay, useWallet } from '../../context/WalletContext';
+import { buildProcessPayrollTransaction } from '../../services/aleo';
+import type { TransactionStatus } from '../../types/ghostpay';
 
 export default function ProcessPayroll() {
-  const { employees, setPayments, setBatchSummaries, wallet, addTransaction } = useWallet();
+  const { employees, addTransaction, refreshRecords } = useGhostPay();
+  const { publicKey, requestTransaction } = useWallet();
+
   const [bonuses, setBonuses] = useState<Record<string, string>>({});
   const [txStatus, setTxStatus] = useState<TransactionStatus>({
     state: 'idle', timestamp: Date.now(), description: '',
@@ -37,53 +32,88 @@ export default function ProcessPayroll() {
 
   const handleProcess = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!publicKey || !requestTransaction) {
+      return alert('Please connect your Leo Wallet first');
+    }
     if (employees.length === 0) return alert('No employees to process');
 
-    setTxStatus({ state: 'building', timestamp: Date.now(), description: `Building payroll batch for ${employees.length} employees...` });
-    await new Promise(r => setTimeout(r, 800));
+    // Verify all employees have record plaintexts (needed for the transaction)
+    const missingPlaintexts = employees.filter(emp => !emp._recordPlaintext);
+    if (missingPlaintexts.length > 0) {
+      return alert(
+        'Some employee records are missing plaintext data. ' +
+        'Please refresh records first using the Refresh button in the header.',
+      );
+    }
 
-    setTxStatus({ state: 'proving', timestamp: Date.now(), description: 'Generating ZK proofs (salary constraints, tax calculations)...' });
-    await new Promise(r => setTimeout(r, 2000));
+    try {
+      // Generate a unique batch ID and nonce for this payroll cycle
+      const batchId = `${Math.floor(Math.random() * 999_999_999)}`;
+      const batchNonce = Math.floor(Math.random() * 10000);
 
-    setTxStatus({ state: 'broadcasting', timestamp: Date.now(), description: 'Broadcasting batch to Aleo Testnet...' });
-    await new Promise(r => setTimeout(r, 1200));
+      setTxStatus({
+        state: 'building',
+        timestamp: Date.now(),
+        description: `Building payroll batch for ${employees.length} employees...`,
+      });
 
-    // Simulate payroll results matching the Leo contract formula
-    const batchHash = `${Math.floor(Math.random() * 999999999)}field`;
-    const batchNonce = Math.floor(Math.random() * 10000);
+      // Process each employee sequentially (Leo Wallet handles one TX at a time)
+      for (let i = 0; i < employees.length; i++) {
+        const emp = employees[i];
+        const bonus = parseInt(bonuses[emp.employee_id_hash] || '0', 10);
 
-    const newPayments: SalaryPayment[] = employees.map(emp => {
-      const bonus = parseInt(bonuses[emp.employee_id_hash] || '0', 10);
-      const tax = Math.floor(emp.base_salary / 10000) * emp.tax_rate_bps;
-      const net = emp.base_salary + bonus - tax;
-      return {
-        owner: emp.owner,
-        employer: emp.employer,
-        batch_hash: batchHash,
-        net_salary: net,
-        bonus,
-        tax_deducted: tax,
-        payment_nonce: `${Math.floor(Math.random() * 999999)}field`,
-      };
-    });
+        setTxStatus({
+          state: 'proving',
+          timestamp: Date.now(),
+          description: `Processing employee ${i + 1}/${employees.length}... Leo Wallet generating ZK proof`,
+        });
 
-    const summary: PayrollBatchSummary = {
-      batch_hash: batchHash,
-      employer: wallet.address!,
-      employee_count: employees.length,
-      nonce: batchNonce,
-      finalized: true,
-    };
+        // Build and submit the transaction via Leo Wallet
+        const transaction = buildProcessPayrollTransaction(
+          publicKey,
+          emp._recordPlaintext!,
+          bonus,
+          batchId,
+          batchNonce,
+        );
 
-    setPayments(prev => [...prev, ...newPayments]);
-    setBatchSummaries(prev => [...prev, summary]);
+        const txId = await requestTransaction(transaction);
 
-    const txId = `at1${Math.random().toString(36).slice(2, 18)}`;
-    setTxStatus({ state: 'confirmed', timestamp: Date.now(), description: `Payroll processed: ${employees.length} payments issued`, txId });
-    addTransaction({ state: 'confirmed', timestamp: Date.now(), description: `Payroll batch ${batchHash.slice(0, 8)}...`, txId });
+        addTransaction({
+          state: 'confirmed',
+          timestamp: Date.now(),
+          description: `Payroll: employee ${i + 1}/${employees.length}`,
+          txId: txId as string,
+        });
+      }
 
-    setBonuses({});
-    setTimeout(() => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }), 5000);
+      setTxStatus({
+        state: 'confirmed',
+        timestamp: Date.now(),
+        description: `Payroll processed: ${employees.length} payments submitted`,
+      });
+
+      // Refresh records to pick up new SalaryPayment records
+      await refreshRecords();
+
+      setBonuses({});
+      setTimeout(
+        () => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }),
+        5000,
+      );
+    } catch (error) {
+      console.error('Payroll processing failed:', error);
+      setTxStatus({
+        state: 'failed',
+        timestamp: Date.now(),
+        description: `Failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+      setTimeout(
+        () => setTxStatus({ state: 'idle', timestamp: Date.now(), description: '' }),
+        6000,
+      );
+    }
   };
 
   return (
@@ -118,6 +148,9 @@ export default function ProcessPayroll() {
               <span className="text-[10px] text-gray-600">μcredits</span>
             </div>
           ))}
+          {employees.length === 0 && (
+            <p className="text-sm text-gray-500">No employees registered. Register employees first.</p>
+          )}
         </div>
 
         {/* ZK proof explanation */}
@@ -127,13 +160,15 @@ export default function ProcessPayroll() {
             Each payment generates a <strong className="text-emerald-300">zero-knowledge proof</strong> that:
             net_salary = base + bonus − tax, tax is correctly calculated from tax_rate_bps,
             and net_salary ≥ min_salary. The chain <strong className="text-emerald-300">verifies these constraints
-            without seeing any amounts</strong>.
+              without seeing any amounts</strong>.
           </p>
         </div>
 
         <TransactionStatusBar status={txStatus} />
 
-        <button type="submit" className="ghost-btn w-full" disabled={txStatus.state !== 'idle' && txStatus.state !== 'confirmed'}>
+        <button type="submit" className="ghost-btn w-full"
+          disabled={!publicKey || employees.length === 0 ||
+            (txStatus.state !== 'idle' && txStatus.state !== 'confirmed')}>
           <Zap className="h-4 w-4" />
           Process Payroll ({employees.length} employees)
         </button>
@@ -141,4 +176,3 @@ export default function ProcessPayroll() {
     </GlowCard>
   );
 }
-

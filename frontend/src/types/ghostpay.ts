@@ -12,7 +12,7 @@
 // ========================================================
 
 /** Represents the active user role in the application */
-export type UserRole = 'employer' | 'employee' | 'auditor';
+export type UserRole = "employer" | "employee" | "auditor";
 
 /**
  * Private employee record — mirrors `record EmployeeRecord` in Leo.
@@ -24,14 +24,16 @@ export type UserRole = 'employer' | 'employee' | 'auditor';
  * The commitment (hash) is stored on-chain; the salary details are private.
  */
 export interface EmployeeRecord {
-  owner: string;              // Employee wallet address
-  employer: string;           // Employer who created this record
-  employee_id_hash: string;   // BHP256 hash of off-chain employee identifier (field)
-  salary_commitment: string;  // BHP256::hash(packed_salary + salt) — anchored on-chain (field)
-  base_salary: number;        // Gross base salary in microcredits (u64)
-  tax_rate_bps: number;       // Tax rate in basis points, e.g. 2000 = 20% (u16, max 10000)
-  min_salary: number;         // Contractual minimum net salary per period (u64)
-  salt: string;               // Random blinding factor for commitment (scalar)
+  owner: string; // Employee wallet address
+  employer: string; // Employer who created this record
+  employee_id_hash: string; // BHP256 hash of off-chain employee identifier (field)
+  salary_commitment: string; // BHP256::hash(packed_salary + salt) — anchored on-chain (field)
+  base_salary: number; // Gross base salary in microcredits (u64)
+  tax_rate_bps: number; // Tax rate in basis points, e.g. 2000 = 20% (u16, max 10000)
+  min_salary: number; // Contractual minimum net salary per period (u64)
+  salt: string; // Random blinding factor for commitment (scalar)
+  /** Raw decrypted record string from Leo Wallet — needed as input for program transitions */
+  _recordPlaintext?: string;
 }
 
 /**
@@ -45,13 +47,15 @@ export interface EmployeeRecord {
  * double-claiming — once claimed, the nonce is marked on-chain.
  */
 export interface SalaryPayment {
-  owner: string;           // Employee wallet address
-  employer: string;        // Employer who issued the payment
-  batch_hash: string;      // Batch this payment belongs to (field)
-  net_salary: number;      // Final net: base + bonus - tax (u64)
-  bonus: number;           // Discretionary bonus component (u64)
-  tax_deducted: number;    // Tax withheld this period (u64)
-  payment_nonce: string;   // Unique per (employee, batch) — prevents double-claim (field)
+  owner: string; // Employee wallet address
+  employer: string; // Employer who issued the payment
+  batch_hash: string; // Batch this payment belongs to (field)
+  net_salary: number; // Final net: base + bonus - tax (u64)
+  bonus: number; // Discretionary bonus component (u64)
+  tax_deducted: number; // Tax withheld this period (u64)
+  payment_nonce: string; // Unique per (employee, batch) — prevents double-claim (field)
+  /** Raw decrypted record string from Leo Wallet — needed as input for claim_salary */
+  _recordPlaintext?: string;
 }
 
 /**
@@ -64,12 +68,14 @@ export interface SalaryPayment {
  * bonuses, tax breakdowns, or employee wallet addresses.
  */
 export interface AuditProof {
-  owner: string;                  // Auditor wallet address
-  employer: string;               // Employer being audited
-  batch_hash: string;             // Batch being audited (field)
-  total_disbursed: number;        // Sum of all net salaries in the batch (u64)
-  employee_count: number;         // Number of employees paid (u32)
-  employees_merkle_root: string;  // Hash chain root proving employee inclusion (field)
+  owner: string; // Auditor wallet address
+  employer: string; // Employer being audited
+  batch_hash: string; // Batch being audited (field)
+  total_disbursed: number; // Sum of all net salaries in the batch (u64)
+  employee_count: number; // Number of employees paid (u32)
+  employees_merkle_root: string; // Hash chain root proving employee inclusion (field)
+  /** Raw decrypted record string from Leo Wallet */
+  _recordPlaintext?: string;
 }
 
 /**
@@ -80,11 +86,11 @@ export interface AuditProof {
  * Anyone on the Aleo network can read this.
  */
 export interface PayrollBatchSummary {
-  batch_hash: string;      // Unique batch identifier (field)
-  employer: string;        // Employer who authorized (address)
-  employee_count: number;  // Headcount at batch time (u32)
-  nonce: number;           // Replay-prevention nonce (u64)
-  finalized: boolean;      // Whether the batch is closed
+  batch_hash: string; // Unique batch identifier (field)
+  employer: string; // Employer who authorized (address)
+  employee_count: number; // Headcount at batch time (u32)
+  nonce: number; // Replay-prevention nonce (u64)
+  finalized: boolean; // Whether the batch is closed
 }
 
 // ========================================================
@@ -92,7 +98,13 @@ export interface PayrollBatchSummary {
 // ========================================================
 
 /** Transaction lifecycle states shown in the UI */
-export type TransactionState = 'idle' | 'building' | 'proving' | 'broadcasting' | 'confirmed' | 'failed';
+export type TransactionState =
+  | "idle"
+  | "building"
+  | "proving"
+  | "broadcasting"
+  | "confirmed"
+  | "failed";
 
 /** Wraps a pending or completed transaction for UI display */
 export interface TransactionStatus {
@@ -108,7 +120,7 @@ export interface WalletState {
   connected: boolean;
   address: string | null;
   publicKey: string | null;
-  network: 'testnet' | 'mainnet';
+  network: "testnet" | "mainnet";
 }
 
 /** Form data for registering a new employee */
@@ -141,5 +153,4 @@ export interface GenerateAuditInput {
  * Privacy visibility indicator — used by PrivacyBadge component
  * to show users what data is public vs. private.
  */
-export type PrivacyLevel = 'private' | 'public' | 'selective';
-
+export type PrivacyLevel = "private" | "public" | "selective";

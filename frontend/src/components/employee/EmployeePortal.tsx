@@ -19,10 +19,10 @@ import { User, Wallet, Download, Hash } from 'lucide-react';
 import StatusCard from '../common/StatusCard';
 import SalaryView from './SalaryView';
 import ClaimSalary from './ClaimSalary';
-import { useWallet } from '../../context/WalletContext';
+import { useGhostPay } from '../../context/WalletContext';
 
 export default function EmployeePortal() {
-  const { employees, payments } = useWallet();
+  const { employees, payments } = useGhostPay();
   const myRecord = employees[0] || null;
   const myPayments = payments.filter(p => p.owner === myRecord?.owner);
   const totalEarnings = myPayments.reduce((s, p) => s + p.net_salary, 0);

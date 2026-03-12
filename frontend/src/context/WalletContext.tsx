@@ -1,144 +1,188 @@
 // ========================================================
-// WalletContext — Global state for the connected Aleo wallet
+// WalletContext — GhostPay application state
 //
-// Manages:
-//   - Wallet connection state (address, keys, network)
+// Uses Leo Wallet adapter for wallet operations and manages:
+//   - Parsed on-chain records (employees, payments, audit proofs)
+//   - Batch summaries from public mappings
+//   - Transaction history log
 //   - Active user role (employer / employee / auditor)
-//   - Demo data for offline demonstration
-//   - Transaction history
+//   - Record refresh via Leo Wallet's `requestRecords()`
 //
-// In production, this would integrate with the Leo Wallet
-// browser extension. For the hackathon, we use ephemeral
-// accounts generated via the Aleo SDK.
+// The actual wallet connection (address, signing, decrypting)
+// is handled by the Leo Wallet adapter's `useWallet()` hook
+// from `@demox-labs/aleo-wallet-adapter-react`.
 // ========================================================
 
-import React, { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  type ReactNode,
+} from 'react';
+import { useWallet as useLeoWallet } from '@demox-labs/aleo-wallet-adapter-react';
+
 import type {
   UserRole,
-  WalletState,
   EmployeeRecord,
   SalaryPayment,
   AuditProof,
   PayrollBatchSummary,
   TransactionStatus,
 } from '../types/ghostpay';
-import { generateDemoData } from '../services/aleo';
+import { parseAllRecords, PROGRAM_ID } from '../services/aleo';
 
 // ============================================================
 // Context Shape
 // ============================================================
 
-interface WalletContextType {
-  // Wallet state
-  wallet: WalletState;
-  connectWallet: (privateKey?: string) => Promise<void>;
-  disconnectWallet: () => void;
-
-  // Role management
+interface GhostPayContextType {
+  // Role management (for UI switching)
   activeRole: UserRole;
   setActiveRole: (role: UserRole) => void;
 
-  // Demo data (simulated on-chain + private state)
+  // Parsed on-chain records (populated by refreshRecords)
   employees: EmployeeRecord[];
-  setEmployees: React.Dispatch<React.SetStateAction<EmployeeRecord[]>>;
   payments: SalaryPayment[];
-  setPayments: React.Dispatch<React.SetStateAction<SalaryPayment[]>>;
   auditProofs: AuditProof[];
-  setAuditProofs: React.Dispatch<React.SetStateAction<AuditProof[]>>;
   batchSummaries: PayrollBatchSummary[];
-  setBatchSummaries: React.Dispatch<React.SetStateAction<PayrollBatchSummary[]>>;
+
+  // Record refresh from Leo Wallet
+  refreshRecords: () => Promise<void>;
+  isRefreshing: boolean;
 
   // Transaction log
   transactions: TransactionStatus[];
   addTransaction: (tx: TransactionStatus) => void;
   updateTransaction: (txId: string, update: Partial<TransactionStatus>) => void;
-
-  // Demo mode flag
-  isDemoMode: boolean;
 }
 
-const WalletContext = createContext<WalletContextType | null>(null);
+const GhostPayContext = createContext<GhostPayContextType | null>(null);
 
 // ============================================================
 // Provider Component
 // ============================================================
 
-export function WalletProvider({ children }: { children: ReactNode }) {
-  // Initialize with demo data for hackathon presentation
-  const demo = useMemo(() => generateDemoData(), []);
+export function GhostPayProvider({ children }: { children: ReactNode }) {
+  // Leo Wallet adapter hook — provides wallet connection, record fetching, etc.
+  const { publicKey, requestRecords } = useLeoWallet();
 
-  const [wallet, setWallet] = useState<WalletState>({
-    connected: true,
-    address: demo.employer,
-    publicKey: null,
-    network: 'testnet',
-  });
-
+  // Application state — starts empty, populated by refreshRecords()
   const [activeRole, setActiveRole] = useState<UserRole>('employer');
-  const [employees, setEmployees] = useState<EmployeeRecord[]>(demo.employees);
-  const [payments, setPayments] = useState<SalaryPayment[]>(demo.payments);
-  const [auditProofs, setAuditProofs] = useState<AuditProof[]>([demo.auditProof]);
-  const [batchSummaries, setBatchSummaries] = useState<PayrollBatchSummary[]>([demo.batchSummary]);
+  const [employees, setEmployees] = useState<EmployeeRecord[]>([]);
+  const [payments, setPayments] = useState<SalaryPayment[]>([]);
+  const [auditProofs, setAuditProofs] = useState<AuditProof[]>([]);
+  const [batchSummaries, setBatchSummaries] = useState<PayrollBatchSummary[]>([]);
   const [transactions, setTransactions] = useState<TransactionStatus[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const connectWallet = useCallback(async (_privateKey?: string) => {
-    // In demo mode, simulate wallet connection
-    setWallet({
-      connected: true,
-      address: demo.employer,
-      publicKey: null,
-      network: 'testnet',
-    });
-  }, [demo.employer]);
+  /**
+   * Fetch and parse all private records from the Leo Wallet.
+   *
+   * Calls `requestRecords(PROGRAM_ID)` which asks the Leo Wallet to scan
+   * the Aleo network for records belonging to the connected account,
+   * decrypt them, and return the plaintexts.
+   *
+   * Records are then parsed by type (EmployeeRecord, SalaryPayment, AuditProof)
+   * using the parsers in services/aleo.ts.
+   */
+  const refreshRecords = useCallback(async () => {
+    if (!publicKey || !requestRecords) {
+      console.warn('Cannot refresh records: wallet not connected');
+      return;
+    }
 
-  const disconnectWallet = useCallback(() => {
-    setWallet({ connected: false, address: null, publicKey: null, network: 'testnet' });
-  }, []);
+    setIsRefreshing(true);
+    try {
+      // Request all records for the GhostPay program from Leo Wallet
+      const rawRecords = await requestRecords(PROGRAM_ID);
 
+      // Parse and categorize records by type
+      const parsed = parseAllRecords(rawRecords as Array<{ plaintext: string }>);
+
+      // Update state with parsed records
+      setEmployees(parsed.employees);
+      setPayments(parsed.payments);
+      setAuditProofs(parsed.auditProofs);
+
+      console.log(
+        `Records refreshed: ${parsed.employees.length} employees, ` +
+        `${parsed.payments.length} payments, ${parsed.auditProofs.length} audit proofs`,
+      );
+    } catch (error) {
+      console.error('Failed to refresh records:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [publicKey, requestRecords]);
+
+  // Transaction logging helpers
   const addTransaction = useCallback((tx: TransactionStatus) => {
     setTransactions(prev => [tx, ...prev]);
   }, []);
 
-  const updateTransaction = useCallback((txId: string, update: Partial<TransactionStatus>) => {
-    setTransactions(prev =>
-      prev.map(tx => (tx.txId === txId ? { ...tx, ...update } : tx)),
-    );
-  }, []);
+  const updateTransaction = useCallback(
+    (txId: string, update: Partial<TransactionStatus>) => {
+      setTransactions(prev =>
+        prev.map(tx => (tx.txId === txId ? { ...tx, ...update } : tx)),
+      );
+    },
+    [],
+  );
 
-  const value = useMemo<WalletContextType>(
+  const value = useMemo<GhostPayContextType>(
     () => ({
-      wallet,
-      connectWallet,
-      disconnectWallet,
       activeRole,
       setActiveRole,
       employees,
-      setEmployees,
       payments,
-      setPayments,
       auditProofs,
-      setAuditProofs,
       batchSummaries,
-      setBatchSummaries,
+      refreshRecords,
+      isRefreshing,
       transactions,
       addTransaction,
       updateTransaction,
-      isDemoMode: true,
     }),
-    [wallet, connectWallet, disconnectWallet, activeRole, employees, payments,
-     auditProofs, batchSummaries, transactions, addTransaction, updateTransaction],
+    [
+      activeRole,
+      employees,
+      payments,
+      auditProofs,
+      batchSummaries,
+      refreshRecords,
+      isRefreshing,
+      transactions,
+      addTransaction,
+      updateTransaction,
+    ],
   );
 
-  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+  return (
+    <GhostPayContext.Provider value={value}>
+      {children}
+    </GhostPayContext.Provider>
+  );
 }
 
 // ============================================================
-// Hook
+// Hooks
 // ============================================================
 
-export function useWallet(): WalletContextType {
-  const ctx = useContext(WalletContext);
-  if (!ctx) throw new Error('useWallet must be used within WalletProvider');
+/**
+ * Access GhostPay application state (records, transactions, role).
+ * Must be used within GhostPayProvider.
+ */
+export function useGhostPay(): GhostPayContextType {
+  const ctx = useContext(GhostPayContext);
+  if (!ctx) throw new Error('useGhostPay must be used within GhostPayProvider');
   return ctx;
 }
 
+/**
+ * Re-export useWallet from Leo Wallet adapter for convenience.
+ * Components use this for wallet operations (publicKey, requestTransaction, etc.)
+ * and useGhostPay() for application state (records, transactions, role).
+ */
+export { useLeoWallet as useWallet };
