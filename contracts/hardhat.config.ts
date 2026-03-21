@@ -15,6 +15,7 @@ export default defineConfig({
             enabled: true,
             runs: 200,
           },
+          evmVersion: "cancun",
         },
       },
     },
@@ -32,7 +33,13 @@ export default defineConfig({
       type: "http",
       chainType: "l1",
       url: configVariable("SEPOLIA_RPC_URL"),
-      accounts: [configVariable("SEPOLIA_PRIVATE_KEY")],
+      accounts: [configVariable("PRIVATE_KEY")],
+    },
+    "arb-seploia": {
+      type: "http",
+      chainId: 421614,
+      url: configVariable("ARBITRUM_SEPOLIA_RPC_URL "),
+      accounts: [configVariable("PRIVATE_KEY")],
     },
   },
 });

@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@fhenixprotocol/cofhe-contracts':
+        specifier: ^0.1.0
+        version: 0.1.0
+      '@fhenixprotocol/cofhe-mock-contracts':
+        specifier: ^0.3.1
+        version: 0.3.1(@fhenixprotocol/cofhe-contracts@0.1.0)(@openzeppelin/contracts-upgradeable@5.6.1(@openzeppelin/contracts@5.6.1))(@openzeppelin/contracts@5.6.1)
       '@nomicfoundation/hardhat-ethers':
         specifier: ^4.0.6
         version: 4.0.6(hardhat@3.2.0)
@@ -266,6 +272,16 @@ packages:
   '@ethersproject/web@5.8.0':
     resolution: {integrity: sha512-j7+Ksi/9KfGviws6Qtf9Q7KCqRhpwrYKQPs+JBA/rKVFF/yaWLHJEH3zfVP2plVu+eys0d2DlFmhoQJayFewcw==}
 
+  '@fhenixprotocol/cofhe-contracts@0.1.0':
+    resolution: {integrity: sha512-Nt5+bJtRgiT9lUrBXEEhJLttVtqO/Rk7wI5KC5+la1zGcYnCym/mT+ExlyjsX+Pf9cpE2Qje8nhfTDSMERGLtA==}
+
+  '@fhenixprotocol/cofhe-mock-contracts@0.3.1':
+    resolution: {integrity: sha512-a2Fi9e6emgoPwO/vMhN9m/QXHl7ypQP1YixlJaLkAX80vtm2rAM77O7xcslCzH7R9NNHGJxiME+comrpNjII5g==}
+    peerDependencies:
+      '@fhenixprotocol/cofhe-contracts': 0.0.13
+      '@openzeppelin/contracts': ^5.0.0
+      '@openzeppelin/contracts-upgradeable': ^5.0.0
+
   '@isaacs/cliui@8.0.2':
     resolution: {integrity: sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA==}
     engines: {node: '>=12'}
@@ -458,6 +474,14 @@ packages:
   '@nomicfoundation/solidity-analyzer@0.1.2':
     resolution: {integrity: sha512-q4n32/FNKIhQ3zQGGw5CvPF6GTvDCpYwIf7bEY/dZTZbgfDsHyjJwURxUJf3VQuuJj+fDIFl4+KkBVbw4Ef6jA==}
     engines: {node: '>= 12'}
+
+  '@openzeppelin/contracts-upgradeable@5.6.1':
+    resolution: {integrity: sha512-n4a/vfRs114lXyUdYg7pyY8LvFKWvCDF5lEcRRAVxap8g6ZEdLqm+9tmt2zTtRHcNMxTYp9y5t6KBof4tHp7Og==}
+    peerDependencies:
+      '@openzeppelin/contracts': 5.6.1
+
+  '@openzeppelin/contracts@5.6.1':
+    resolution: {integrity: sha512-Ly6SlsVJ3mj+b18W3R8gNufB7dTICT105fJhodGAGgyC2oqnBAhqSiNDJ8V8DLY05cCz81GLI0CU5vNYA1EC/w==}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -1402,6 +1426,16 @@ snapshots:
       '@ethersproject/properties': 5.8.0
       '@ethersproject/strings': 5.8.0
 
+  '@fhenixprotocol/cofhe-contracts@0.1.0':
+    dependencies:
+      '@openzeppelin/contracts': 5.6.1
+
+  '@fhenixprotocol/cofhe-mock-contracts@0.3.1(@fhenixprotocol/cofhe-contracts@0.1.0)(@openzeppelin/contracts-upgradeable@5.6.1(@openzeppelin/contracts@5.6.1))(@openzeppelin/contracts@5.6.1)':
+    dependencies:
+      '@fhenixprotocol/cofhe-contracts': 0.1.0
+      '@openzeppelin/contracts': 5.6.1
+      '@openzeppelin/contracts-upgradeable': 5.6.1(@openzeppelin/contracts@5.6.1)
+
   '@isaacs/cliui@8.0.2':
     dependencies:
       string-width: 5.1.2
@@ -1674,6 +1708,12 @@ snapshots:
       '@nomicfoundation/solidity-analyzer-linux-x64-gnu': 0.1.2
       '@nomicfoundation/solidity-analyzer-linux-x64-musl': 0.1.2
       '@nomicfoundation/solidity-analyzer-win32-x64-msvc': 0.1.2
+
+  '@openzeppelin/contracts-upgradeable@5.6.1(@openzeppelin/contracts@5.6.1)':
+    dependencies:
+      '@openzeppelin/contracts': 5.6.1
+
+  '@openzeppelin/contracts@5.6.1': {}
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
