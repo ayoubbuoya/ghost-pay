@@ -4,6 +4,7 @@ import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { config } from '../lib/wagmi';
 import { queryClient } from '../lib/query-client';
+import { CofheProvider } from './CofheProvider';
 
 interface Web3ProviderProps {
   children: ReactNode;
@@ -14,7 +15,9 @@ export function Web3Provider({ children }: Web3ProviderProps) {
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider theme={darkTheme()}>
-          {children}
+          <CofheProvider>
+            {children}
+          </CofheProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
